@@ -67,6 +67,10 @@ func Init() bool {
 		panic(err)
 	}
 
+	fmt.Println(hProc)
+	fmt.Println(dwClient)
+	fmt.Println(dwEngine)
+
 	return true
 }
 
@@ -89,11 +93,12 @@ func catchGame() (windows.Handle, uint32, error) {
 
 	for windows.Process32Next(hHandle, &procEntry) == nil {
 
-		if len(procEntry.ExeFile) < 8 {
+		if len(procEntry.ExeFile) < cap(szTarget) {
 			continue
 		}
 
-		if reflect.DeepEqual(szTarget[:8], procEntry.ExeFile[:8]) {
+		if reflect.DeepEqual(szTarget, procEntry.ExeFile[:len(szTarget)]) {
+			fmt.Println("Found the juicer!")
 			iPid = procEntry.ProcessID
 			hProc, err = windows.OpenProcess(PROCESS_ALL_ACCESS, false, iPid)
 			if err != nil {
@@ -104,16 +109,16 @@ func catchGame() (windows.Handle, uint32, error) {
 		}
 	}
 
-	windows.CloseHandle(hHandle)
+	defer windows.CloseHandle(hHandle)
 	return hProc, iPid, nil
 }
 
-func catchModules(iPid uint32) (uint32, uint32, error) {
-	var dwClient uint32
-	var dwEngine uint32
+func catchModules(iPid uint32) (uintptr, uintptr, error) {
+	var dwClient uintptr
+	var dwEngine uintptr
 	hHandle, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE32, iPid)
-	szClient := []uint16{'c', 'l', 'i', 'e', 't', '.', 'd', 'l', 'l'}
-	szEngine := []uint16{'e', 'n', 'g', 'i', 'n', 'e', '.', 'd', 'l', 'l'}
+	szClient := [9]uint16{'c', 'l', 'i', 'e', 't', '.', 'd', 'l', 'l'}
+	szEngine := [10]uint16{'e', 'n', 'g', 'i', 'n', 'e', '.', 'd', 'l', 'l'}
 	if err != nil {
 		fmt.Println("could not create module snapshot")
 		return dwClient, dwEngine, err
@@ -121,24 +126,24 @@ func catchModules(iPid uint32) (uint32, uint32, error) {
 
 	var mEntry moduleEntry32
 	for module32Next(hHandle, &mEntry) == nil {
-		if len(mEntry.SzModule) < 9 {
+		if len(mEntry.SzModule) < cap(szClient) {
 			continue
 		}
 
-		if reflect.DeepEqual(szClient[:9], mEntry.SzModule[:9]) {
-			dwClient = uint32(*mEntry.ModBaseAddr)
+		if reflect.DeepEqual(szClient, mEntry.SzModule[:len(szClient)]) {
+			dwClient = uintptr(unsafe.Pointer(mEntry.ModBaseAddr))
 		}
 
-		if len(mEntry.SzModule) < 10 {
+		if len(mEntry.SzModule) < cap(szEngine) {
 			continue
 		}
 
-		if reflect.DeepEqual(szEngine[:10], mEntry.SzModule[:10]) {
-			dwEngine = uint32(*mEntry.ModBaseAddr)
+		if reflect.DeepEqual(szEngine, mEntry.SzModule[:len(szEngine)]) {
+			dwEngine = uintptr(unsafe.Pointer(mEntry.ModBaseAddr))
 		}
 	}
 
-	windows.CloseHandle(hHandle)
+	defer windows.CloseHandle(hHandle)
 
 	return dwClient, dwEngine, nil
 }
