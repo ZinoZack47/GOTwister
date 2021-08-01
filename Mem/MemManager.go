@@ -1,8 +1,10 @@
 package mem
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -42,9 +44,27 @@ type moduleEntry32 struct {
 }
 
 var (
-	modkernel32       = windows.NewLazySystemDLL("kernel32.dll")
-	procModule32NextW = modkernel32.NewProc("Module32NextW")
+	modkernel32            = windows.NewLazySystemDLL("kernel32.dll")
+	procModule32NextW      = modkernel32.NewProc("Module32NextW")
+	procReadProcessMemory  = modkernel32.NewProc("ReadProcessMemory")
+	procWriteProcessMemory = modkernel32.NewProc("WriteProcessMemory")
 )
+
+func RPM(dwAddress uint32, pRead uintptr, iSize uintptr) (err error) {
+	r1, _, e1 := procReadProcessMemory.Call(uintptr(MemManager().Proc), uintptr(dwAddress), pRead, iSize, 0)
+	if r1 == 0 {
+		err = e1
+	}
+	return
+}
+
+func WPM(dwAddress uint32, pWrite uintptr, iSize uintptr) (err error) {
+	r1, _, e1 := procWriteProcessMemory.Call(uintptr(MemManager().Proc), uintptr(dwAddress), pWrite, iSize, 0)
+	if r1 == 0 {
+		err = e1
+	}
+	return
+}
 
 func module32Next(snapshot windows.Handle, mEntry *moduleEntry32) (err error) {
 	r1, _, e1 := syscall.Syscall(procModule32NextW.Addr(), 2, uintptr(snapshot), uintptr(unsafe.Pointer(mEntry)), 0)
@@ -54,24 +74,31 @@ func module32Next(snapshot windows.Handle, mEntry *moduleEntry32) (err error) {
 	return
 }
 
-func Init() bool {
-	hProc, iPid, err := catchGame()
+type MemManager_t struct {
+	Proc   windows.Handle
+	Client uint32
+	Engine uint32
+}
 
-	if err != nil {
-		panic(err)
-	}
+var instantiated *MemManager_t
+var once sync.Once
 
-	dwClient, dwEngine, err := catchModules(iPid)
+func MemManager() *MemManager_t {
+	once.Do(func() {
+		hProc, iPid, err := catchGame()
 
-	if err != nil {
-		panic(err)
-	}
+		if err != nil {
+			panic(err)
+		}
 
-	fmt.Println(hProc)
-	fmt.Println(dwClient)
-	fmt.Println(dwEngine)
+		dwClient, dwEngine, err := catchModules(iPid)
 
-	return true
+		if err != nil {
+			panic(err)
+		}
+		instantiated = &MemManager_t{hProc, uint32(dwClient), uint32(dwEngine)}
+	})
+	return instantiated
 }
 
 func catchGame() (windows.Handle, uint32, error) {
@@ -109,6 +136,10 @@ func catchGame() (windows.Handle, uint32, error) {
 		}
 	}
 
+	if iPid == 0 {
+		return hProc, iPid, errors.New("couldn't find target process")
+	}
+
 	defer windows.CloseHandle(hHandle)
 	return hProc, iPid, nil
 }
@@ -141,6 +172,14 @@ func catchModules(iPid uint32) (uintptr, uintptr, error) {
 		if reflect.DeepEqual(szEngine, mEntry.SzModule[:len(szEngine)]) {
 			dwEngine = uintptr(unsafe.Pointer(mEntry.ModBaseAddr))
 		}
+	}
+
+	if dwClient == 0 {
+		return dwClient, dwEngine, errors.New("client.dll not found")
+	}
+
+	if dwEngine == 0 {
+		return dwClient, dwEngine, errors.New("engine.dll not found")
 	}
 
 	defer windows.CloseHandle(hHandle)
