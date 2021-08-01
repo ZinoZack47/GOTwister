@@ -32,5 +32,6 @@ func Radar() {
 			continue
 		}
 
+		mem.SetSpotted(dwEnt, true)
 	}
 }

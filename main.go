@@ -1,9 +1,13 @@
 package main
 
 import (
-	"fmt"
+	features "gotwister/Features"
+	"time"
 )
 
 func main() {
-	fmt.Scanln()
+	for {
+		features.Radar()
+		time.Sleep(100 * time.Millisecond)
+	}
 }
