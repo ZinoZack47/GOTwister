@@ -51,7 +51,7 @@ var (
 )
 
 func RPM(dwAddress uint32, pRead uintptr, iSize uintptr) (err error) {
-	r1, _, e1 := procReadProcessMemory.Call(uintptr(MemManager().Proc), uintptr(dwAddress), pRead, iSize, 0)
+	r1, _, e1 := syscall.Syscall6(procReadProcessMemory.Addr(), 5, uintptr(MemManager().Proc), uintptr(dwAddress), pRead, iSize, 0, 0)
 	if r1 == 0 {
 		err = e1
 	}
@@ -59,7 +59,7 @@ func RPM(dwAddress uint32, pRead uintptr, iSize uintptr) (err error) {
 }
 
 func WPM(dwAddress uint32, pWrite uintptr, iSize uintptr) (err error) {
-	r1, _, e1 := procWriteProcessMemory.Call(uintptr(MemManager().Proc), uintptr(dwAddress), pWrite, iSize, 0)
+	r1, _, e1 := syscall.Syscall6(procWriteProcessMemory.Addr(), 5, uintptr(MemManager().Proc), uintptr(dwAddress), pWrite, iSize, 0, 0)
 	if r1 == 0 {
 		err = e1
 	}
@@ -118,7 +118,16 @@ func catchGame() (windows.Handle, uint32, error) {
 		return hProc, iPid, err
 	}
 
-	for windows.Process32Next(hHandle, &procEntry) == nil {
+	for {
+
+		err = windows.Process32Next(hHandle, &procEntry)
+
+		if err != nil {
+			if err == syscall.ERROR_NO_MORE_FILES {
+				return hProc, iPid, errors.New("couldn't find target process")
+			}
+			return hProc, iPid, err
+		}
 
 		if len(procEntry.ExeFile) < cap(szTarget) {
 			continue
@@ -134,10 +143,6 @@ func catchGame() (windows.Handle, uint32, error) {
 			}
 			break
 		}
-	}
-
-	if iPid == 0 {
-		return hProc, iPid, errors.New("couldn't find target process")
 	}
 
 	defer windows.CloseHandle(hHandle)
@@ -156,7 +161,23 @@ func catchModules(iPid uint32) (uintptr, uintptr, error) {
 	}
 
 	var mEntry moduleEntry32
-	for module32Next(hHandle, &mEntry) == nil {
+	for {
+
+		err = module32Next(hHandle, &mEntry)
+
+		if err != nil {
+			if err == syscall.ERROR_NO_MORE_FILES {
+				if dwClient == 0 || dwEngine == 0 {
+					return dwClient, dwEngine, fmt.Errorf("client 0x%06x not found or engine 0x%06x not found", dwClient, dwEngine)
+				}
+			}
+			return dwClient, dwEngine, err
+		}
+
+		if dwClient != 0 && dwEngine != 0 {
+			break
+		}
+
 		if len(mEntry.SzModule) < cap(szClient) {
 			continue
 		}
@@ -172,14 +193,6 @@ func catchModules(iPid uint32) (uintptr, uintptr, error) {
 		if reflect.DeepEqual(szEngine, mEntry.SzModule[:len(szEngine)]) {
 			dwEngine = uintptr(unsafe.Pointer(mEntry.ModBaseAddr))
 		}
-	}
-
-	if dwClient == 0 {
-		return dwClient, dwEngine, errors.New("client.dll not found")
-	}
-
-	if dwEngine == 0 {
-		return dwClient, dwEngine, errors.New("engine.dll not found")
 	}
 
 	defer windows.CloseHandle(hHandle)
