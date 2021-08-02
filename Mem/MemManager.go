@@ -106,12 +106,13 @@ func catchGame() (windows.Handle, uint32, error) {
 	var iPid uint32
 	const PROCESS_ALL_ACCESS = 0x1F1FFB
 	szTarget := [8]uint16{'c', 's', 'g', 'o', '.', 'e', 'x', 'e'}
-	var procEntry windows.ProcessEntry32
 	hHandle, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		fmt.Println("could not create snapshot")
 		return hProc, iPid, err
 	}
+	var procEntry windows.ProcessEntry32
+	procEntry.Size = uint32(unsafe.Sizeof(procEntry))
 	err = windows.Process32First(hHandle, &procEntry)
 	if err != nil {
 		fmt.Println("could not get first process")
@@ -161,6 +162,7 @@ func catchModules(iPid uint32) (uintptr, uintptr, error) {
 	}
 
 	var mEntry moduleEntry32
+	mEntry.DwSize = uint32(unsafe.Sizeof(mEntry))
 	for {
 
 		err = module32Next(hHandle, &mEntry)
