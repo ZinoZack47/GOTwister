@@ -30,7 +30,7 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-type moduleEntry32 struct {
+type moduleEntry32W struct {
 	DwSize        uint32
 	Th32ModuleID  uint32
 	Th32ProcessID uint32
@@ -53,7 +53,7 @@ var (
 func RPM(dwAddress uint32, pRead uintptr, iSize uintptr) (err error) {
 	r1, _, e1 := syscall.Syscall6(procReadProcessMemory.Addr(), 5, uintptr(MemManager().Proc), uintptr(dwAddress), pRead, iSize, 0, 0)
 	if r1 == 0 {
-		err = e1
+		err = errnoErr(e1)
 	}
 	return
 }
@@ -61,12 +61,12 @@ func RPM(dwAddress uint32, pRead uintptr, iSize uintptr) (err error) {
 func WPM(dwAddress uint32, pWrite uintptr, iSize uintptr) (err error) {
 	r1, _, e1 := syscall.Syscall6(procWriteProcessMemory.Addr(), 5, uintptr(MemManager().Proc), uintptr(dwAddress), pWrite, iSize, 0, 0)
 	if r1 == 0 {
-		err = e1
+		err = errnoErr(e1)
 	}
 	return
 }
 
-func module32Next(snapshot windows.Handle, mEntry *moduleEntry32) (err error) {
+func module32NextW(snapshot windows.Handle, mEntry *moduleEntry32W) (err error) {
 	r1, _, e1 := syscall.Syscall(procModule32NextW.Addr(), 2, uintptr(snapshot), uintptr(unsafe.Pointer(mEntry)), 0)
 	if r1 == 0 {
 		err = errnoErr(e1)
@@ -134,8 +134,7 @@ func catchGame() (windows.Handle, uint32, error) {
 			continue
 		}
 
-		if reflect.DeepEqual(szTarget, procEntry.ExeFile[:len(szTarget)]) {
-			fmt.Println("Found the juicer!")
+		if reflect.DeepEqual(szTarget[:], procEntry.ExeFile[:len(szTarget)]) {
 			iPid = procEntry.ProcessID
 			hProc, err = windows.OpenProcess(PROCESS_ALL_ACCESS, false, iPid)
 			if err != nil {
@@ -153,38 +152,38 @@ func catchGame() (windows.Handle, uint32, error) {
 func catchModules(iPid uint32) (uintptr, uintptr, error) {
 	var dwClient uintptr
 	var dwEngine uintptr
-	hHandle, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE32, iPid)
-	szClient := [9]uint16{'c', 'l', 'i', 'e', 't', '.', 'd', 'l', 'l'}
+	hHandle, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE, iPid)
+	szClient := [10]uint16{'c', 'l', 'i', 'e', 'n', 't', '.', 'd', 'l', 'l'}
 	szEngine := [10]uint16{'e', 'n', 'g', 'i', 'n', 'e', '.', 'd', 'l', 'l'}
 	if err != nil {
 		fmt.Println("could not create module snapshot")
 		return dwClient, dwEngine, err
 	}
 
-	var mEntry moduleEntry32
+	var mEntry moduleEntry32W
 	mEntry.DwSize = uint32(unsafe.Sizeof(mEntry))
 	for {
 
-		err = module32Next(hHandle, &mEntry)
+		if dwClient != 0 && dwEngine != 0 {
+			break
+		}
+
+		err = module32NextW(hHandle, &mEntry)
 
 		if err != nil {
 			if err == syscall.ERROR_NO_MORE_FILES {
 				if dwClient == 0 || dwEngine == 0 {
-					return dwClient, dwEngine, fmt.Errorf("client 0x%06x not found or engine 0x%06x not found", dwClient, dwEngine)
+					return dwClient, dwEngine, fmt.Errorf("client 0x%06x not found and/or engine 0x%06x not found", dwClient, dwEngine)
 				}
 			}
 			return dwClient, dwEngine, err
-		}
-
-		if dwClient != 0 && dwEngine != 0 {
-			break
 		}
 
 		if len(mEntry.SzModule) < cap(szClient) {
 			continue
 		}
 
-		if reflect.DeepEqual(szClient, mEntry.SzModule[:len(szClient)]) {
+		if reflect.DeepEqual(szClient[:], mEntry.SzModule[:len(szClient)]) {
 			dwClient = uintptr(unsafe.Pointer(mEntry.ModBaseAddr))
 		}
 
@@ -192,7 +191,7 @@ func catchModules(iPid uint32) (uintptr, uintptr, error) {
 			continue
 		}
 
-		if reflect.DeepEqual(szEngine, mEntry.SzModule[:len(szEngine)]) {
+		if reflect.DeepEqual(szEngine[:], mEntry.SzModule[:len(szEngine)]) {
 			dwEngine = uintptr(unsafe.Pointer(mEntry.ModBaseAddr))
 		}
 	}
