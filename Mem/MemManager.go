@@ -1,11 +1,11 @@
 package mem
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -125,7 +125,8 @@ func catchGame() (windows.Handle, uint32, error) {
 
 		if err != nil {
 			if err == syscall.ERROR_NO_MORE_FILES {
-				return hProc, iPid, errors.New("couldn't find target process")
+				time.Sleep(time.Second)
+				return catchGame()
 			}
 			return hProc, iPid, err
 		}
