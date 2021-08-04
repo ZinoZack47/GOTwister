@@ -2,6 +2,7 @@
 *.exe
 *.exe~
 *.dll
+*.h
 *.so
 *.dylib
 
